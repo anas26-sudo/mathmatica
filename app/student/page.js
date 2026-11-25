@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Flame, Trophy, ClipboardCheck, GraduationCap, Camera, ImagePlus, Timer, Send, LogOut, X, Eye } from 'lucide-react';
+import { Flame, Trophy, ClipboardCheck, GraduationCap, Camera, ImagePlus, Timer, Send, LogOut, X, Eye, FileQuestion, ExternalLink } from 'lucide-react';
 import { Navbar, Footer, Stat, StatusBadge, Lightbox, useNow } from '@/components/ui';
 import { list, put, uploadImage } from '@/lib/db';
 import { currentDay, dayWindow, questionRange, cellStatus, earned, totalPoints, streak, fmtCountdown, subId, avgPct, pct } from '@/lib/logic';
@@ -19,6 +19,7 @@ export default function StudentPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [view, setView] = useState(null);
+  const [qModal, setQModal] = useState(null);
   const cam = useRef(null), gal = useRef(null);
 
   const load = useCallback(async () => {
@@ -52,6 +53,18 @@ export default function StudentPage() {
   const [qa, qb] = active ? questionRange(a, cd) : [0, 0];
   const pts = earned(subs), total = totalPoints(a);
   const quiz = scores.filter((s) => s.type === 'quiz'), month = scores.filter((s) => s.type === 'monthly');
+
+  const todayQuestions = active ? [...(a.dayFiles?.[cd] || []), ...(a.sheets || [])] : [];
+
+  function openQuestions(items, title) {
+    if (!items.length) return;
+    const onlyImages = items.every((x) => !x.isPdf);
+    if (onlyImages) {
+      setView({ images: items.map((x) => x.url), title });
+    } else {
+      setQModal({ items, title });
+    }
+  }
 
   function addFiles(list_) {
     const arr = [...list_].filter((f) => f.type.startsWith('image/')).map((file) => ({ file, url: URL.createObjectURL(file) }));
@@ -105,8 +118,23 @@ export default function StudentPage() {
                 </div>
               </div>
 
+              {todayQuestions.length > 0 && (
+                <div className="mt-4 rounded-xl border border-cyan2/40 bg-cyan2/10 p-3.5 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="font-bold text-white text-sm">Today&apos;s Questions Sheet · أسئلة واجب اليوم</div>
+                    <div className="text-xs text-slate-300">Solve Q{qa}–{qb} from the attached sheet below</div>
+                  </div>
+                  <button
+                    onClick={() => openQuestions(todayQuestions, `Day ${cd} Questions (Q${qa}–${qb})`)}
+                    className="btn !py-2 !px-4 text-sm"
+                  >
+                    <FileQuestion size={17} />View Questions ({todayQuestions.length})
+                  </button>
+                </div>
+              )}
+
               {todaySub && <p className="mt-4 flex flex-wrap items-center gap-2 text-sm"><StatusBadge status={todaySub.status === 'rejected' ? 'rejected' : 'submitted'} /> {todaySub.status === 'rejected' ? 'Your teacher asked you to redo this day. Upload again before the timer ends.' : 'Submitted. You can replace your photos until the timer ends.'}
-                <button className="btn btn-ghost !py-1 text-xs" onClick={() => setView(todaySub)}><Eye size={14} />View</button></p>}
+                <button className="btn btn-ghost !py-1 text-xs" onClick={() => setView({ images: todaySub.images, title: `Day ${todaySub.day} homework` })}><Eye size={14} />View my upload</button></p>}
 
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <button className="btn" onClick={() => cam.current.click()}><Camera size={18} />Take photo</button>
@@ -137,12 +165,23 @@ export default function StudentPage() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
             {Array.from({ length: a.days }, (_, i) => i + 1).map((d) => {
               const s = cellStatus(a, bySub[d], d, now); const [x, y] = questionRange(a, d);
+              const dQs = [...(a.dayFiles?.[d] || []), ...(a.sheets || [])];
               return (
-                <button key={d} disabled={!bySub[d]} onClick={() => setView(bySub[d])} className={`rounded-xl border p-3 text-left ${d === cd ? 'border-cyan2 shadow-neon' : 'border-neon/25'}`}>
-                  <div className="font-bold text-white">Day {d}</div>
-                  <div className="mb-2 text-xs text-slate-400">Q{x}–{y}</div>
-                  <StatusBadge status={s} short />
-                </button>
+                <div key={d} className={`rounded-xl border p-3 text-left flex flex-col justify-between ${d === cd ? 'border-cyan2 shadow-neon' : 'border-neon/25'}`}>
+                  <div>
+                    <div className="font-bold text-white">Day {d}</div>
+                    <div className="mb-2 text-xs text-slate-400">Q{x}–{y}</div>
+                    <StatusBadge status={s} short />
+                  </div>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {dQs.length > 0 && (
+                      <button onClick={() => openQuestions(dQs, `Day ${d} Questions (Q${x}–${y})`)} className="text-[11px] text-cyan2 hover:underline">Qs</button>
+                    )}
+                    {bySub[d] && (
+                      <button onClick={() => setView({ images: bySub[d].images, title: `Day ${d} solution` })} className="text-[11px] text-slate-300 hover:underline">My Sol</button>
+                    )}
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -155,7 +194,32 @@ export default function StudentPage() {
         </section>
       </main>
       <Footer />
-      {view && <Lightbox images={view.images} title={`Day ${view.day} homework`} onClose={() => setView(null)} />}
+      {view && <Lightbox images={view.images} title={view.title} onClose={() => setView(null)} />}
+      {qModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={() => setQModal(null)}>
+          <div className="panel max-h-[85vh] w-full max-w-2xl overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-neon/20 pb-3 mb-4">
+              <h3 className="text-lg font-bold text-white">{qModal.title}</h3>
+              <button onClick={() => setQModal(null)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              {qModal.items.map((item, idx) => (
+                <div key={idx} className="rounded-lg border border-neon/20 bg-ink/60 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-semibold text-cyan2">{item.name}</span>
+                    <a href={item.url} target="_blank" rel="noreferrer" className="btn btn-ghost !py-1 !px-2.5 text-xs"><ExternalLink size={13} />Open / Download</a>
+                  </div>
+                  {item.isPdf ? (
+                    <iframe src={item.url} className="h-96 w-full rounded border border-neon/20 bg-white" title={item.name} />
+                  ) : (
+                    <img src={item.url} alt={item.name} className="max-h-96 mx-auto rounded border border-neon/20 bg-white" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

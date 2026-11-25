@@ -1,9 +1,9 @@
 'use client';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Table2, BookPlus, FileSpreadsheet, Users, LogOut, Download, Trash2, Plus, RefreshCw, Check, Ban, Edit3, RotateCcw, FileText, X } from 'lucide-react';
+import { Table2, BookPlus, FileSpreadsheet, Users, LogOut, Download, Trash2, Plus, RefreshCw, Check, Ban, Edit3, RotateCcw, FileText, X, Upload, Paperclip, ExternalLink } from 'lucide-react';
 import { Navbar, Footer, StatusBadge, Modal, useNow } from '@/components/ui';
-import { list, put, del, resetDemo, isLive } from '@/lib/db';
+import { list, put, del, resetDemo, isLive, uploadImage } from '@/lib/db';
 import { currentDay, cellStatus, earned, totalPoints, subId, questionRange, avgPct, streak } from '@/lib/logic';
 
 const TABS = [['tracker', Table2, 'Tracker'], ['homework', BookPlus, 'Homework'], ['exams', FileSpreadsheet, 'Exams'], ['students', Users, 'Students']];
@@ -170,35 +170,64 @@ function CellModal({ a, s, d, sub, now, act, onClose }) {
 function Homework({ D, sortedHw, a, setSelectedHwId, act }) {
   const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   const [f, setF] = useState({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' });
+  const [sheetFiles, setSheetFiles] = useState([]);
+  const [existingSheets, setExistingSheets] = useState([]);
   const [editingId, setEditingId] = useState(null);
+  const [uploadingDay, setUploadingDay] = useState(null);
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const dayFileRef = useRef(null);
+  const [targetDayForUpload, setTargetDayForUpload] = useState(null);
 
   const availableGrades = ['All', ...new Set(['Prep 2', 'Prep 3', 'Sec 1', ...D.students.map((s) => s.grade)])];
   const availableGroups = ['All', ...new Set(D.students.map((s) => s.group))];
 
   const per = Math.ceil((+f.total || 1) / (+f.days || 1));
 
+  const uploadAttachments = async (fileList, prefix) => {
+    const uploaded = [];
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      const ext = file.name.split('.').pop() || 'file';
+      const url = await uploadImage(file, `sheets/${prefix}_${Date.now()}_${i}.${ext}`);
+      uploaded.push({ name: file.name, url, isPdf: file.type === 'application/pdf' || ext.toLowerCase() === 'pdf' });
+    }
+    return uploaded;
+  };
+
   const saveHw = (e) => {
     e.preventDefault();
     if (+f.total < +f.days) return setMsg('Total questions must be at least the number of days.');
+    setBusy(true);
     act(async () => {
-      const id = editingId || ('a_' + uid());
-      const existing = D.assignments.find((x) => x.id === editingId);
-      await put('assignments', {
-        id,
-        title: f.title,
-        total: +f.total,
-        days: +f.days,
-        pts: +f.pts,
-        start: new Date(f.start).toISOString(),
-        targetGrade: f.targetGrade,
-        targetGroup: f.targetGroup,
-        createdAt: existing?.createdAt || Date.now()
-      });
-      setSelectedHwId(id);
-      setMsg(editingId ? 'Homework updated successfully!' : 'Published! Students in this target group will see it.');
-      setEditingId(null);
-      setF({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' });
+      try {
+        const id = editingId || ('a_' + uid());
+        const existing = D.assignments.find((x) => x.id === editingId);
+        const newlyUploaded = sheetFiles.length ? await uploadAttachments(sheetFiles, `${id}_general`) : [];
+        const finalSheets = [...existingSheets, ...newlyUploaded];
+
+        await put('assignments', {
+          id,
+          title: f.title,
+          total: +f.total,
+          days: +f.days,
+          pts: +f.pts,
+          start: new Date(f.start).toISOString(),
+          targetGrade: f.targetGrade,
+          targetGroup: f.targetGroup,
+          sheets: finalSheets,
+          dayFiles: existing?.dayFiles || {},
+          createdAt: existing?.createdAt || Date.now()
+        });
+        setSelectedHwId(id);
+        setMsg(editingId ? 'Homework updated successfully!' : 'Published! Students can now view the questions and submit.');
+        setEditingId(null);
+        setSheetFiles([]);
+        setExistingSheets([]);
+        setF({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' });
+      } finally {
+        setBusy(false);
+      }
     });
   };
 
@@ -213,7 +242,42 @@ function Homework({ D, sortedHw, a, setSelectedHwId, act }) {
       targetGrade: hw.targetGrade || 'All',
       targetGroup: hw.targetGroup || 'All'
     });
+    setExistingSheets(hw.sheets || []);
+    setSheetFiles([]);
     setMsg('');
+  };
+
+  const handleDayUpload = async (e) => {
+    const files = e.target.files;
+    if (!files?.length || !a || !targetDayForUpload) return;
+    const day = targetDayForUpload;
+    setUploadingDay(day);
+    act(async () => {
+      try {
+        const uploaded = await uploadAttachments(files, `${a.id}_day${day}`);
+        const currentDayFiles = a.dayFiles || {};
+        const updatedDayFiles = {
+          ...currentDayFiles,
+          [day]: [...(currentDayFiles[day] || []), ...uploaded]
+        };
+        await put('assignments', { ...a, dayFiles: updatedDayFiles });
+        setMsg(`Questions uploaded for Day ${day}!`);
+      } finally {
+        setUploadingDay(null);
+        setTargetDayForUpload(null);
+        e.target.value = '';
+      }
+    });
+  };
+
+  const clearDayFiles = (day) => {
+    if (!a || !confirm(`Remove uploaded question files for Day ${day}?`)) return;
+    act(async () => {
+      const updatedDayFiles = { ...(a.dayFiles || {}) };
+      delete updatedDayFiles[day];
+      await put('assignments', { ...a, dayFiles: updatedDayFiles });
+      setMsg(`Cleared Day ${day} files.`);
+    });
   };
 
   const resetHwSubmissions = (hw) => {
@@ -238,11 +302,12 @@ function Homework({ D, sortedHw, a, setSelectedHwId, act }) {
 
   return (
     <div className="space-y-6">
+      <input ref={dayFileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={handleDayUpload} />
       <div className="grid gap-5 md:grid-cols-2">
         <form onSubmit={saveHw} className="panel space-y-3 p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-white">{editingId ? 'Edit homework' : 'New weekly homework'}</h2>
-            {editingId && <button type="button" onClick={() => { setEditingId(null); setF({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' }); }} className="text-xs text-slate-400 hover:text-white flex items-center gap-1"><X size={14} />Cancel edit</button>}
+            {editingId && <button type="button" onClick={() => { setEditingId(null); setExistingSheets([]); setSheetFiles([]); setF({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' }); }} className="text-xs text-slate-400 hover:text-white flex items-center gap-1"><X size={14} />Cancel edit</button>}
           </div>
           <input className="input" placeholder="Title (e.g. Week 2 — Geometry)" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required />
           
@@ -263,14 +328,30 @@ function Homework({ D, sortedHw, a, setSelectedHwId, act }) {
             {[['total', 'Questions'], ['days', 'Days'], ['pts', 'Pts / day']].map(([k, l]) => <label key={k} className="text-xs text-slate-300">{l}<input type="number" min="1" className="input mt-1" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} required /></label>)}
           </div>
           <label className="block text-xs text-slate-300">Day 1 opens at (each day lasts 24 hours)<input type="datetime-local" className="input mt-1" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} required /></label>
+
+          <div className="rounded-lg border border-neon/25 bg-ink/50 p-3">
+            <label className="block text-xs font-semibold text-cyan2 mb-1.5">Attach General Sheet / PDF or Images (ملف أو صور الأسئلة)</label>
+            <input type="file" accept="image/*,application/pdf" multiple onChange={(e) => setSheetFiles([...e.target.files])} className="text-xs text-slate-300 file:mr-3 file:rounded-md file:border-0 file:bg-neon/20 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-cyan2 hover:file:bg-neon/30" />
+            {existingSheets.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {existingSheets.map((s, idx) => (
+                  <span key={idx} className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-0.5 text-[11px] text-slate-200">
+                    <Paperclip size={11} />{s.name}
+                    <button type="button" onClick={() => setExistingSheets(existingSheets.filter((_, i) => i !== idx))} className="text-red-400 ml-1"><X size={12} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <p className="text-sm text-cyan2">{per} questions a day · {f.days * f.pts} points in total</p>
           {msg && <p className="text-sm text-emerald-300">{msg}</p>}
-          <button className="btn w-full">{editingId ? <><Check size={18} />Save changes</> : <><Plus size={18} />Publish homework</>}</button>
+          <button className="btn w-full" disabled={busy}>{busy ? 'Uploading & Saving...' : editingId ? <><Check size={18} />Save changes</> : <><Plus size={18} />Publish homework</>}</button>
         </form>
 
         <div className="panel p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <h2 className="text-lg font-bold text-white">Daily schedule</h2>
+            <h2 className="text-lg font-bold text-white">Daily schedule & Questions</h2>
             {a && (
               <div className="flex gap-1.5">
                 <button onClick={() => startEdit(a)} className="btn btn-ghost !px-2.5 !py-1 text-xs" title="Edit this homework"><Edit3 size={13} />Edit</button>
@@ -279,9 +360,42 @@ function Homework({ D, sortedHw, a, setSelectedHwId, act }) {
               </div>
             )}
           </div>
-          <p className="mb-3 text-sm text-cyan2">{a ? `${a.title} (${a.targetGrade || 'All'} · ${a.targetGroup || 'All'})` : 'Nothing published yet.'}</p>
-          <ul className="space-y-1 text-sm max-h-64 overflow-y-auto pr-1">
-            {(a ? Array.from({ length: a.days }, (_, i) => i + 1) : []).map((d) => { const [x, y] = questionRange(a, d); const t = new Date(new Date(a.start).getTime() + (d - 1) * 86400000); return <li key={d} className="flex justify-between border-b border-neon/10 py-1"><span>Day {d}: Q{x}–{y}</span><span className="text-slate-400">{t.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span></li>; })}
+          <p className="mb-1 text-sm text-cyan2">{a ? `${a.title} (${a.targetGrade || 'All'} · ${a.targetGroup || 'All'})` : 'Nothing published yet.'}</p>
+          {a?.sheets?.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+              <span>General Sheet:</span>
+              {a.sheets.map((s, i) => <a key={i} href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded bg-cyan2/15 px-2 py-0.5 text-cyan2 hover:underline"><ExternalLink size={11} />{s.name}</a>)}
+            </div>
+          )}
+          <ul className="space-y-2 text-sm max-h-72 overflow-y-auto pr-1">
+            {(a ? Array.from({ length: a.days }, (_, i) => i + 1) : []).map((d) => {
+              const [x, y] = questionRange(a, d);
+              const t = new Date(new Date(a.start).getTime() + (d - 1) * 86400000);
+              const dFiles = a.dayFiles?.[d] || [];
+              return (
+                <li key={d} className="flex flex-wrap items-center justify-between gap-2 border-b border-neon/10 py-1.5">
+                  <div>
+                    <span className="font-semibold text-white">Day {d}: Q{x}–{y}</span>
+                    <span className="block text-xs text-slate-400">{t.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {dFiles.length > 0 && (
+                      <>
+                        <a href={dFiles[0].url} target="_blank" rel="noreferrer" className="rounded bg-emerald-500/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-500/30">{dFiles.length} file(s)</a>
+                        <button onClick={() => clearDayFiles(d)} className="text-red-400 p-1" title="Remove day files"><X size={13} /></button>
+                      </>
+                    )}
+                    <button
+                      disabled={uploadingDay === d}
+                      onClick={() => { setTargetDayForUpload(d); dayFileRef.current.click(); }}
+                      className="inline-flex items-center gap-1 rounded border border-cyan2/40 bg-cyan2/10 px-2 py-1 text-xs font-medium text-cyan2 hover:bg-cyan2/20"
+                    >
+                      <Upload size={12} />{uploadingDay === d ? 'Uploading...' : dFiles.length ? '+ More' : 'Upload Qs'}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>
