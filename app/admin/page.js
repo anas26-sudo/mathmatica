@@ -471,10 +471,25 @@ function ScoreRow({ r, name, act }) {
 }
 
 /* ---------------- Students ---------------- */
+const genPin = () => String(Math.floor(1000 + Math.random() * 9000));
+
 function Students({ D, sortedHw, now, act }) {
   const [f, setF] = useState({ name: '', grade: 'Prep 2', group: 'A' });
   const nextCode = useMemo(() => 'MATH-' + (Math.max(100, ...D.students.map((s) => parseInt(s.code.split('-')[1]) || 0)) + 1), [D.students]);
-  const add = (e) => { e.preventDefault(); act(async () => { await put('students', { id: 's_' + uid(), code: nextCode, ...f, name: f.name.trim(), notes: '' }); setF({ ...f, name: '' }); }); };
+  const add = (e) => {
+    e.preventDefault();
+    act(async () => {
+      await put('students', { id: 's_' + uid(), code: nextCode, pin: genPin(), ...f, name: f.name.trim(), notes: '' });
+      setF({ ...f, name: '' });
+    });
+  };
+  const generateMissingPins = () => {
+    act(async () => {
+      for (const s of D.students.filter((x) => !x.pin)) {
+        await put('students', { ...s, pin: genPin() });
+      }
+    });
+  };
   const remove = (s) => confirm(`Remove ${s.name} and all their data?`) && act(async () => {
     await del('students', s.id);
     for (const x of D.submissions.filter((x) => x.studentId === s.id)) await del('submissions', x.id);
@@ -484,12 +499,12 @@ function Students({ D, sortedHw, now, act }) {
   const getStudentHw = (s) => sortedHw.find((hw) => (!hw.targetGrade || hw.targetGrade === 'All' || hw.targetGrade === s.grade) && (!hw.targetGroup || hw.targetGroup === 'All' || hw.targetGroup === s.group)) || null;
 
   function exportCsv() {
-    const head = ['Name', 'Code', 'Grade', 'Group', 'Homework points', 'Total points', 'Streak', 'Quiz avg %', 'Monthly avg %', 'Monthly Notes'];
+    const head = ['Name', 'Code', 'PIN', 'Grade', 'Group', 'Homework points', 'Total points', 'Streak', 'Quiz avg %', 'Monthly avg %', 'Monthly Notes'];
     const rows = D.students.map((s) => {
       const hw = getStudentHw(s);
       const mine = hw ? D.submissions.filter((x) => x.studentId === s.id && x.assignmentId === hw.id) : [];
       const sc = D.scores.filter((x) => x.studentId === s.id);
-      return [s.name, s.code, s.grade, s.group, earned(mine), hw ? totalPoints(hw) : 0, hw ? streak(hw, mine, now) : 0, avgPct(sc.filter((x) => x.type === 'quiz')) ?? '', avgPct(sc.filter((x) => x.type === 'monthly')) ?? '', s.notes || ''];
+      return [s.name, s.code, s.pin || '', s.grade, s.group, earned(mine), hw ? totalPoints(hw) : 0, hw ? streak(hw, mine, now) : 0, avgPct(sc.filter((x) => x.type === 'quiz')) ?? '', avgPct(sc.filter((x) => x.type === 'monthly')) ?? '', s.notes || ''];
     });
     const csv = '\ufeff' + [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const el = document.createElement('a'); el.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); el.download = 'mathmatica-report.csv'; el.click();
@@ -517,7 +532,7 @@ function Students({ D, sortedHw, now, act }) {
           </div>
           <div class="info">
             <div><strong>Student:</strong> ${s.name}</div>
-            <div><strong>Code:</strong> ${s.code}</div>
+            <div><strong>Code / PIN:</strong> ${s.code} (PIN: ${s.pin || '—'})</div>
             <div><strong>Grade:</strong> ${s.grade}</div>
             <div><strong>Group:</strong> ${s.group}</div>
           </div>
@@ -566,6 +581,8 @@ function Students({ D, sortedHw, now, act }) {
   }
 
   const grades = [...new Set(['Prep 2', 'Prep 3', 'Sec 1', ...D.students.map((s) => s.grade)])];
+  const hasMissingPins = D.students.some((s) => !s.pin);
+
   return (
     <div className="space-y-5">
       <form onSubmit={add} className="panel grid gap-3 p-5 sm:grid-cols-5">
@@ -575,14 +592,15 @@ function Students({ D, sortedHw, now, act }) {
         <button className="btn"><Plus size={18} />Add · {nextCode}</button>
       </form>
       <div className="flex flex-wrap justify-end gap-2">
+        {hasMissingPins && <button className="btn btn-ghost !py-2 text-sm text-amber-300" onClick={generateMissingPins}>Generate missing PINs</button>}
         <button className="btn !py-2 text-sm" onClick={() => printStudentPdf(D.students)} disabled={!D.students.length}><FileText size={16} />All Monthly PDFs</button>
         <button className="btn btn-ghost !py-2 text-sm" onClick={exportCsv}><Download size={16} />Export CSV</button>
       </div>
       <div className="panel overflow-x-auto">
-        <table className="w-full min-w-[750px] text-sm">
-          <thead><tr className="border-b border-neon/25 text-left text-slate-300"><th className="p-3">Name</th><th className="p-3">Code</th><th className="p-3">Grade & Group</th><th className="p-3">Monthly Notes (ملاحظات الشهر)</th><th className="p-3 text-right">Report / Delete</th></tr></thead>
+        <table className="w-full min-w-[820px] text-sm">
+          <thead><tr className="border-b border-neon/25 text-left text-slate-300"><th className="p-3">Name</th><th className="p-3">Code</th><th className="p-3">PIN</th><th className="p-3">Grade & Group</th><th className="p-3">Monthly Notes (ملاحظات الشهر)</th><th className="p-3 text-right">Report / Delete</th></tr></thead>
           <tbody>{D.students.map((s) => <StudentRow key={s.id} s={s} act={act} remove={remove} onPdf={() => printStudentPdf([s])} />)}
-            {D.students.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-slate-400">Add your first student above to generate a login code.</td></tr>}</tbody>
+            {D.students.length === 0 && <tr><td colSpan="6" className="p-6 text-center text-slate-400">Add your first student above to generate a login code & PIN.</td></tr>}</tbody>
         </table>
       </div>
     </div>
@@ -595,10 +613,18 @@ function StudentRow({ s, act, remove, onPdf }) {
   const saveNote = () => {
     if (note !== (s.notes || '')) act(() => put('students', { ...s, notes: note }));
   };
+  const resetPin = () => {
+    const newPin = genPin();
+    act(() => put('students', { ...s, pin: newPin }));
+  };
   return (
     <tr className="border-b border-neon/10">
       <td className="p-3 font-semibold text-white">{s.name}</td>
       <td className="p-3 font-mono neon-text">{s.code}</td>
+      <td className="p-3 font-mono">
+        <span className="rounded bg-amber-400/15 px-2 py-0.5 text-amber-300 font-bold">{s.pin || '—'}</span>
+        <button onClick={resetPin} className="ml-1.5 text-[11px] text-slate-400 hover:text-cyan2 underline" title="Generate new PIN">New</button>
+      </td>
       <td className="p-3 text-slate-300">{s.grade} · {s.group}</td>
       <td className="p-2">
         <input className="input !py-1.5 text-xs" placeholder="Write monthly note for PDF..." value={note} onChange={(e) => setNote(e.target.value)} onBlur={saveNote} />
