@@ -14,7 +14,7 @@ export default function StudentPage() {
   const [subs, setSubs] = useState([]);
   const [scores, setScores] = useState([]);
   const [ready, setReady] = useState(false);
-  const [files, setFiles] = useState([]); // {file, url}
+  const [files, setFiles] = useState([]);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -27,7 +27,13 @@ export default function StudentPage() {
     const [S, A, SB, SC] = await Promise.all([list('students'), list('assignments'), list('submissions'), list('scores')]);
     const me = S.find((x) => x.id === id);
     if (!me) { localStorage.removeItem('mm_student'); return router.replace('/'); }
-    const cur = [...A].sort((x, y) => new Date(y.start) - new Date(x.start))[0] || null;
+    
+    const myHomeworks = A.filter((hw) => 
+      (!hw.targetGrade || hw.targetGrade === 'All' || hw.targetGrade === me.grade) &&
+      (!hw.targetGroup || hw.targetGroup === 'All' || hw.targetGroup === me.group)
+    ).sort((x, y) => (y.createdAt || new Date(y.start).getTime()) - (x.createdAt || new Date(x.start).getTime()));
+
+    const cur = myHomeworks[0] || null;
     setSt(me); setA(cur); setSubs(SB.filter((x) => x.studentId === id && cur && x.assignmentId === cur.id)); setScores(SC.filter((x) => x.studentId === id)); setReady(true);
   }, [router]);
   useEffect(() => { load().catch((e) => setMsg({ err: e.message })); }, [load]);
@@ -35,7 +41,7 @@ export default function StudentPage() {
   if (!ready) return <><Navbar /><p className="p-10 text-center text-slate-300">Loading…</p></>;
 
   const logout = <button className="btn btn-ghost !py-2 text-sm" onClick={() => { localStorage.removeItem('mm_student'); router.push('/'); }}><LogOut size={16} />Log out</button>;
-  if (!a) return <><Navbar right={logout} /><p className="p-10 text-center text-slate-300">No homework has been published yet. Check back soon.</p><Footer /></>;
+  if (!a) return <><Navbar right={logout} /><p className="p-10 text-center text-slate-300">No homework has been published for {st.grade} (Group {st.group}) yet. Check back soon.</p><Footer /></>;
 
   const cd = currentDay(a, now);
   const active = cd >= 1 && cd <= a.days;

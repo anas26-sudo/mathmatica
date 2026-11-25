@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Table2, BookPlus, FileSpreadsheet, Users, LogOut, Download, Trash2, Plus, RefreshCw, Check, Ban } from 'lucide-react';
+import { Table2, BookPlus, FileSpreadsheet, Users, LogOut, Download, Trash2, Plus, RefreshCw, Check, Ban, Edit3, RotateCcw, FileText, X } from 'lucide-react';
 import { Navbar, Footer, StatusBadge, Modal, useNow } from '@/components/ui';
 import { list, put, del, resetDemo, isLive } from '@/lib/db';
 import { currentDay, cellStatus, earned, totalPoints, subId, questionRange, avgPct, streak } from '@/lib/logic';
@@ -16,6 +16,7 @@ export default function Admin() {
   const [ok, setOk] = useState(false);
   const [D, setD] = useState({ students: [], assignments: [], submissions: [], scores: [] });
   const [err, setErr] = useState('');
+  const [selectedHwId, setSelectedHwId] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -23,13 +24,23 @@ export default function Admin() {
       setD({ students, assignments, submissions, scores }); setErr('');
     } catch (e) { setErr(e.message); }
   }, []);
+
   useEffect(() => {
     if (sessionStorage.getItem('mm_admin') !== '1') return router.replace('/');
     setOk(true); load(); const i = setInterval(load, 20000); return () => clearInterval(i);
   }, [load, router]);
+
+  const sortedHw = useMemo(() => [...D.assignments].sort((x, y) => (y.createdAt || new Date(y.start).getTime()) - (x.createdAt || new Date(x.start).getTime())), [D.assignments]);
+
+  useEffect(() => {
+    if (sortedHw.length && (!selectedHwId || !sortedHw.find((x) => x.id === selectedHwId))) {
+      setSelectedHwId(sortedHw[0].id);
+    }
+  }, [sortedHw, selectedHwId]);
+
   if (!ok) return null;
 
-  const a = [...D.assignments].sort((x, y) => new Date(y.start) - new Date(x.start))[0] || null;
+  const a = sortedHw.find((x) => x.id === selectedHwId) || sortedHw[0] || null;
   const act = async (fn) => { try { await fn(); await load(); } catch (e) { setErr(e.message); } };
   const out = <button className="btn btn-ghost !py-2 text-sm" onClick={() => { sessionStorage.removeItem('mm_admin'); router.push('/'); }}><LogOut size={16} />Log out</button>;
 
@@ -45,10 +56,10 @@ export default function Admin() {
           ))}
         </nav>
         <div className="mt-5">
-          {tab === 'tracker' && <Tracker D={D} a={a} now={now} act={act} />}
-          {tab === 'homework' && <Homework a={a} act={act} />}
+          {tab === 'tracker' && <Tracker D={D} sortedHw={sortedHw} a={a} setSelectedHwId={setSelectedHwId} now={now} act={act} />}
+          {tab === 'homework' && <Homework D={D} sortedHw={sortedHw} a={a} setSelectedHwId={setSelectedHwId} act={act} />}
           {tab === 'exams' && <Exams D={D} act={act} />}
-          {tab === 'students' && <Students D={D} a={a} now={now} act={act} />}
+          {tab === 'students' && <Students D={D} sortedHw={sortedHw} now={now} act={act} />}
         </div>
         {!isLive && <button className="btn btn-ghost mt-8 !py-2 text-xs" onClick={() => act(async () => { if (confirm('Reset demo data?')) await resetDemo(); })}><RefreshCw size={14} />Reset demo data</button>}
       </main>
@@ -58,20 +69,35 @@ export default function Admin() {
 }
 
 /* ---------------- Tracker ---------------- */
-function Tracker({ D, a, now, act }) {
+function Tracker({ D, sortedHw, a, setSelectedHwId, now, act }) {
   const [grade, setGrade] = useState('All');
+  const [group, setGroup] = useState('All');
   const [cell, setCell] = useState(null);
   if (!a) return <p className="text-slate-300">Create a homework batch first (Homework tab).</p>;
+
   const grades = ['All', ...new Set(D.students.map((s) => s.grade))];
-  const rows = D.students.filter((s) => grade === 'All' || s.grade === grade);
+  const groups = ['All', ...new Set(D.students.map((s) => s.group))];
+
+  const rows = D.students.filter((s) => {
+    const matchHwGrade = !a.targetGrade || a.targetGrade === 'All' || s.grade === a.targetGrade;
+    const matchHwGroup = !a.targetGroup || a.targetGroup === 'All' || s.group === a.targetGroup;
+    const matchFilterGrade = grade === 'All' || s.grade === grade;
+    const matchFilterGroup = group === 'All' || s.group === group;
+    return matchHwGrade && matchHwGroup && matchFilterGrade && matchFilterGroup;
+  });
+
   const sub = (sid, d) => D.submissions.find((x) => x.id === subId(a, sid, d));
   const cd = currentDay(a, now);
 
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <select className="input !w-auto" value={grade} onChange={(e) => setGrade(e.target.value)} aria-label="Filter by grade">{grades.map((g) => <option key={g}>{g}</option>)}</select>
-        <span className="text-sm text-slate-300">{a.title} · today is {cd < 1 ? 'not started' : cd > a.days ? 'finished' : `Day ${cd}`}</span>
+        <select className="input !w-auto font-semibold text-cyan2" value={a.id} onChange={(e) => setSelectedHwId(e.target.value)} aria-label="Select Homework">
+          {sortedHw.map((hw) => <option key={hw.id} value={hw.id}>{hw.title} ({hw.targetGrade || 'All'} · {hw.targetGroup || 'All'})</option>)}
+        </select>
+        <select className="input !w-auto" value={grade} onChange={(e) => setGrade(e.target.value)} aria-label="Filter by grade">{grades.map((g) => <option key={g} value={g}>{g === 'All' ? 'All Grades' : g}</option>)}</select>
+        <select className="input !w-auto" value={group} onChange={(e) => setGroup(e.target.value)} aria-label="Filter by group">{groups.map((g) => <option key={g} value={g}>{g === 'All' ? 'All Groups' : g}</option>)}</select>
+        <span className="text-sm text-slate-300">{cd < 1 ? 'Not started' : cd > a.days ? 'Finished' : `Day ${cd}`}</span>
         <span className="ml-auto flex gap-2"><StatusBadge status="submitted" short /><StatusBadge status="pending" short /><StatusBadge status="missed" short /><StatusBadge status="rejected" short /></span>
       </div>
       <div className="panel overflow-x-auto">
@@ -86,7 +112,7 @@ function Tracker({ D, a, now, act }) {
               const mine = D.submissions.filter((x) => x.studentId === s.id && x.assignmentId === a.id);
               return (
                 <tr key={s.id} className="border-b border-neon/10">
-                  <td className="p-3"><div className="font-semibold text-white">{s.name}</div><div className="text-xs text-slate-400">{s.grade} · {s.code}</div></td>
+                  <td className="p-3"><div className="font-semibold text-white">{s.name}</div><div className="text-xs text-slate-400">{s.grade} · {s.group} · {s.code}</div></td>
                   {Array.from({ length: a.days }, (_, i) => {
                     const d = i + 1, st = cellStatus(a, sub(s.id, d), d, now);
                     return <td key={d} className="p-2 text-center"><button onClick={() => setCell({ s, d })} aria-label={`${s.name} day ${d}`}><StatusBadge status={st} short /></button></td>;
@@ -95,7 +121,7 @@ function Tracker({ D, a, now, act }) {
                 </tr>
               );
             })}
-            {rows.length === 0 && <tr><td colSpan={a.days + 2} className="p-6 text-center text-slate-400">No students yet.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={a.days + 2} className="p-6 text-center text-slate-400">No students match this homework target/filter.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -141,35 +167,152 @@ function CellModal({ a, s, d, sub, now, act, onClose }) {
 }
 
 /* ---------------- Homework ---------------- */
-function Homework({ a, act }) {
+function Homework({ D, sortedHw, a, setSelectedHwId, act }) {
   const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  const [f, setF] = useState({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()) });
+  const [f, setF] = useState({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' });
+  const [editingId, setEditingId] = useState(null);
   const [msg, setMsg] = useState('');
-  const per = Math.ceil(f.total / f.days);
-  const create = (e) => {
+
+  const availableGrades = ['All', ...new Set(['Prep 2', 'Prep 3', 'Sec 1', ...D.students.map((s) => s.grade)])];
+  const availableGroups = ['All', ...new Set(D.students.map((s) => s.group))];
+
+  const per = Math.ceil((+f.total || 1) / (+f.days || 1));
+
+  const saveHw = (e) => {
     e.preventDefault();
     if (+f.total < +f.days) return setMsg('Total questions must be at least the number of days.');
-    act(async () => { await put('assignments', { id: 'a_' + uid(), title: f.title, total: +f.total, days: +f.days, pts: +f.pts, start: new Date(f.start).toISOString() }); setMsg('Published. Students see Day 1 at the start time.'); });
+    act(async () => {
+      const id = editingId || ('a_' + uid());
+      const existing = D.assignments.find((x) => x.id === editingId);
+      await put('assignments', {
+        id,
+        title: f.title,
+        total: +f.total,
+        days: +f.days,
+        pts: +f.pts,
+        start: new Date(f.start).toISOString(),
+        targetGrade: f.targetGrade,
+        targetGroup: f.targetGroup,
+        createdAt: existing?.createdAt || Date.now()
+      });
+      setSelectedHwId(id);
+      setMsg(editingId ? 'Homework updated successfully!' : 'Published! Students in this target group will see it.');
+      setEditingId(null);
+      setF({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' });
+    });
   };
+
+  const startEdit = (hw) => {
+    setEditingId(hw.id);
+    setF({
+      title: hw.title,
+      total: hw.total,
+      days: hw.days,
+      pts: hw.pts,
+      start: local(new Date(hw.start)),
+      targetGrade: hw.targetGrade || 'All',
+      targetGroup: hw.targetGroup || 'All'
+    });
+    setMsg('');
+  };
+
+  const resetHwSubmissions = (hw) => {
+    if (!confirm(`Reset all student submissions for "${hw.title}"? Students will be able to submit from scratch.`)) return;
+    act(async () => {
+      const targetSubs = D.submissions.filter((x) => x.assignmentId === hw.id);
+      for (const s of targetSubs) await del('submissions', s.id);
+      setMsg(`Reset complete (${targetSubs.length} submissions cleared).`);
+    });
+  };
+
+  const deleteHw = (hw) => {
+    if (!confirm(`Delete "${hw.title}" and all its submissions permanently?`)) return;
+    act(async () => {
+      await del('assignments', hw.id);
+      const targetSubs = D.submissions.filter((x) => x.assignmentId === hw.id);
+      for (const s of targetSubs) await del('submissions', s.id);
+      if (editingId === hw.id) setEditingId(null);
+      setMsg('Homework deleted.');
+    });
+  };
+
   return (
-    <div className="grid gap-5 md:grid-cols-2">
-      <form onSubmit={create} className="panel space-y-3 p-5">
-        <h2 className="text-lg font-bold text-white">New weekly homework</h2>
-        <input className="input" placeholder="Title (e.g. Week 2 — Geometry)" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required />
-        <div className="grid grid-cols-3 gap-3">
-          {[['total', 'Questions'], ['days', 'Days'], ['pts', 'Pts / day']].map(([k, l]) => <label key={k} className="text-xs text-slate-300">{l}<input type="number" min="1" className="input mt-1" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} required /></label>)}
+    <div className="space-y-6">
+      <div className="grid gap-5 md:grid-cols-2">
+        <form onSubmit={saveHw} className="panel space-y-3 p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white">{editingId ? 'Edit homework' : 'New weekly homework'}</h2>
+            {editingId && <button type="button" onClick={() => { setEditingId(null); setF({ title: '', total: 70, days: 7, pts: 10, start: local(new Date()), targetGrade: 'All', targetGroup: 'All' }); }} className="text-xs text-slate-400 hover:text-white flex items-center gap-1"><X size={14} />Cancel edit</button>}
+          </div>
+          <input className="input" placeholder="Title (e.g. Week 2 — Geometry)" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required />
+          
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs text-slate-300">Target Grade (المرحلة)
+              <select className="input mt-1" value={f.targetGrade} onChange={(e) => setF({ ...f, targetGrade: e.target.value })}>
+                {availableGrades.map((g) => <option key={g} value={g}>{g === 'All' ? 'All Grades (الكل)' : g}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-slate-300">Target Group (الجروب)
+              <select className="input mt-1" value={f.targetGroup} onChange={(e) => setF({ ...f, targetGroup: e.target.value })}>
+                {availableGroups.map((g) => <option key={g} value={g}>{g === 'All' ? 'All Groups (الكل)' : g}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {[['total', 'Questions'], ['days', 'Days'], ['pts', 'Pts / day']].map(([k, l]) => <label key={k} className="text-xs text-slate-300">{l}<input type="number" min="1" className="input mt-1" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} required /></label>)}
+          </div>
+          <label className="block text-xs text-slate-300">Day 1 opens at (each day lasts 24 hours)<input type="datetime-local" className="input mt-1" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} required /></label>
+          <p className="text-sm text-cyan2">{per} questions a day · {f.days * f.pts} points in total</p>
+          {msg && <p className="text-sm text-emerald-300">{msg}</p>}
+          <button className="btn w-full">{editingId ? <><Check size={18} />Save changes</> : <><Plus size={18} />Publish homework</>}</button>
+        </form>
+
+        <div className="panel p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h2 className="text-lg font-bold text-white">Daily schedule</h2>
+            {a && (
+              <div className="flex gap-1.5">
+                <button onClick={() => startEdit(a)} className="btn btn-ghost !px-2.5 !py-1 text-xs" title="Edit this homework"><Edit3 size={13} />Edit</button>
+                <button onClick={() => resetHwSubmissions(a)} className="btn btn-ghost !px-2.5 !py-1 text-xs text-amber-300" title="Clear all student submissions"><RotateCcw size={13} />Reset</button>
+                <button onClick={() => deleteHw(a)} className="btn btn-danger !px-2.5 !py-1 text-xs" title="Delete homework"><Trash2 size={13} />Delete</button>
+              </div>
+            )}
+          </div>
+          <p className="mb-3 text-sm text-cyan2">{a ? `${a.title} (${a.targetGrade || 'All'} · ${a.targetGroup || 'All'})` : 'Nothing published yet.'}</p>
+          <ul className="space-y-1 text-sm max-h-64 overflow-y-auto pr-1">
+            {(a ? Array.from({ length: a.days }, (_, i) => i + 1) : []).map((d) => { const [x, y] = questionRange(a, d); const t = new Date(new Date(a.start).getTime() + (d - 1) * 86400000); return <li key={d} className="flex justify-between border-b border-neon/10 py-1"><span>Day {d}: Q{x}–{y}</span><span className="text-slate-400">{t.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span></li>; })}
+          </ul>
         </div>
-        <label className="block text-xs text-slate-300">Day 1 opens at (each day lasts 24 hours)<input type="datetime-local" className="input mt-1" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} required /></label>
-        <p className="text-sm text-cyan2">{per} questions a day · {f.days * f.pts} points in total</p>
-        {msg && <p className="text-sm text-emerald-300">{msg}</p>}
-        <button className="btn w-full"><Plus size={18} />Publish homework</button>
-      </form>
+      </div>
+
+      {/* All Published Homeworks List */}
       <div className="panel p-5">
-        <h2 className="text-lg font-bold text-white">Daily schedule</h2>
-        <p className="mb-3 text-sm text-slate-400">{a ? `Active: ${a.title}` : 'Nothing published yet.'}</p>
-        <ul className="space-y-1 text-sm">
-          {(a ? Array.from({ length: a.days }, (_, i) => i + 1) : []).map((d) => { const [x, y] = questionRange(a, d); const t = new Date(new Date(a.start).getTime() + (d - 1) * 86400000); return <li key={d} className="flex justify-between border-b border-neon/10 py-1"><span>Day {d}: Q{x}–{y}</span><span className="text-slate-400">{t.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</span></li>; })}
-        </ul>
+        <h3 className="text-base font-bold text-white mb-3">All Published Homeworks ({sortedHw.length})</h3>
+        {sortedHw.length === 0 ? <p className="text-sm text-slate-400">No homework batches created yet.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[600px] text-sm">
+              <thead><tr className="border-b border-neon/25 text-left text-slate-300">
+                <th className="p-2.5">Title</th><th className="p-2.5">Target</th><th className="p-2.5">Questions / Days</th><th className="p-2.5">Start Date</th><th className="p-2.5 text-right">Actions</th>
+              </tr></thead>
+              <tbody>
+                {sortedHw.map((hw) => (
+                  <tr key={hw.id} onClick={() => setSelectedHwId(hw.id)} className={`cursor-pointer border-b border-neon/10 transition ${a?.id === hw.id ? 'bg-neon/10' : 'hover:bg-white/5'}`}>
+                    <td className="p-2.5 font-semibold text-white">{hw.title} {a?.id === hw.id && <span className="ml-2 rounded bg-cyan2/20 px-1.5 py-0.5 text-[10px] text-cyan2">Selected</span>}</td>
+                    <td className="p-2.5 text-cyan2">{hw.targetGrade || 'All'} · {hw.targetGroup || 'All'}</td>
+                    <td className="p-2.5 text-slate-300">{hw.total} Qs / {hw.days} Days</td>
+                    <td className="p-2.5 text-slate-400">{new Date(hw.start).toLocaleDateString()}</td>
+                    <td className="p-2.5 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => startEdit(hw)} className="text-cyan2 hover:underline text-xs">Edit</button>
+                      <button onClick={() => resetHwSubmissions(hw)} className="text-amber-300 hover:underline text-xs">Reset</button>
+                      <button onClick={() => deleteHw(hw)} className="text-red-400 hover:underline text-xs">Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -184,7 +327,7 @@ function Exams({ D, act }) {
     <div className="space-y-5">
       <form onSubmit={add} className="panel grid gap-3 p-5 sm:grid-cols-6">
         <select className="input sm:col-span-2" value={f.type} onChange={(e) => setF({ ...f, type: e.target.value, max: e.target.value === 'quiz' ? 20 : 50 })}><option value="quiz">Session quiz · امتحان الحصة</option><option value="monthly">Monthly exam · امتحان الشهر</option></select>
-        <select className="input sm:col-span-2" value={f.studentId} onChange={(e) => setF({ ...f, studentId: e.target.value })} required><option value="">Student…</option>{D.students.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        <select className="input sm:col-span-2" value={f.studentId} onChange={(e) => setF({ ...f, studentId: e.target.value })} required><option value="">Student…</option>{D.students.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.grade})</option>)}</select>
         <input className="input sm:col-span-2" placeholder="Title (Quiz 2)" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required />
         <input type="number" step="0.5" className="input sm:col-span-2" placeholder="Score" value={f.score} onChange={(e) => setF({ ...f, score: e.target.value })} required />
         <input type="number" className="input sm:col-span-2" placeholder="Out of" value={f.max} onChange={(e) => setF({ ...f, max: e.target.value })} required />
@@ -214,25 +357,100 @@ function ScoreRow({ r, name, act }) {
 }
 
 /* ---------------- Students ---------------- */
-function Students({ D, a, now, act }) {
+function Students({ D, sortedHw, now, act }) {
   const [f, setF] = useState({ name: '', grade: 'Prep 2', group: 'A' });
   const nextCode = useMemo(() => 'MATH-' + (Math.max(100, ...D.students.map((s) => parseInt(s.code.split('-')[1]) || 0)) + 1), [D.students]);
-  const add = (e) => { e.preventDefault(); act(async () => { await put('students', { id: 's_' + uid(), code: nextCode, ...f, name: f.name.trim() }); setF({ ...f, name: '' }); }); };
+  const add = (e) => { e.preventDefault(); act(async () => { await put('students', { id: 's_' + uid(), code: nextCode, ...f, name: f.name.trim(), notes: '' }); setF({ ...f, name: '' }); }); };
   const remove = (s) => confirm(`Remove ${s.name} and all their data?`) && act(async () => {
     await del('students', s.id);
     for (const x of D.submissions.filter((x) => x.studentId === s.id)) await del('submissions', x.id);
     for (const x of D.scores.filter((x) => x.studentId === s.id)) await del('scores', x.id);
   });
+
+  const getStudentHw = (s) => sortedHw.find((hw) => (!hw.targetGrade || hw.targetGrade === 'All' || hw.targetGrade === s.grade) && (!hw.targetGroup || hw.targetGroup === 'All' || hw.targetGroup === s.group)) || null;
+
   function exportCsv() {
-    const head = ['Name', 'Code', 'Grade', 'Group', 'Homework points', 'Total points', 'Streak', 'Quiz avg %', 'Monthly avg %'];
+    const head = ['Name', 'Code', 'Grade', 'Group', 'Homework points', 'Total points', 'Streak', 'Quiz avg %', 'Monthly avg %', 'Monthly Notes'];
     const rows = D.students.map((s) => {
-      const mine = a ? D.submissions.filter((x) => x.studentId === s.id && x.assignmentId === a.id) : [];
+      const hw = getStudentHw(s);
+      const mine = hw ? D.submissions.filter((x) => x.studentId === s.id && x.assignmentId === hw.id) : [];
       const sc = D.scores.filter((x) => x.studentId === s.id);
-      return [s.name, s.code, s.grade, s.group, earned(mine), a ? totalPoints(a) : 0, a ? streak(a, mine, now) : 0, avgPct(sc.filter((x) => x.type === 'quiz')) ?? '', avgPct(sc.filter((x) => x.type === 'monthly')) ?? ''];
+      return [s.name, s.code, s.grade, s.group, earned(mine), hw ? totalPoints(hw) : 0, hw ? streak(hw, mine, now) : 0, avgPct(sc.filter((x) => x.type === 'quiz')) ?? '', avgPct(sc.filter((x) => x.type === 'monthly')) ?? '', s.notes || ''];
     });
     const csv = '\ufeff' + [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const el = document.createElement('a'); el.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); el.download = 'mathmatica-report.csv'; el.click();
   }
+
+  function printStudentPdf(targetStudents) {
+    const monthName = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const cards = targetStudents.map((s) => {
+      const hw = getStudentHw(s);
+      const mine = hw ? D.submissions.filter((x) => x.studentId === s.id && x.assignmentId === hw.id) : [];
+      const sc = D.scores.filter((x) => x.studentId === s.id);
+      const qz = sc.filter((x) => x.type === 'quiz');
+      const mn = sc.filter((x) => x.type === 'monthly');
+      return `
+        <div class="card">
+          <div class="header">
+            <div>
+              <h1>Mathmatica</h1>
+              <p class="sub">Monthly Student Performance Report · ${monthName}</p>
+            </div>
+            <div class="teacher">
+              <strong>AI Eng. Anas Ayman</strong><br/>
+              <span>01552645503 · 01040485663</span>
+            </div>
+          </div>
+          <div class="info">
+            <div><strong>Student:</strong> ${s.name}</div>
+            <div><strong>Code:</strong> ${s.code}</div>
+            <div><strong>Grade:</strong> ${s.grade}</div>
+            <div><strong>Group:</strong> ${s.group}</div>
+          </div>
+          <div class="stats">
+            <div class="stat"><span>Homework Points</span><strong>${earned(mine)} / ${hw ? totalPoints(hw) : 0}</strong></div>
+            <div class="stat"><span>Current Streak</span><strong>${hw ? streak(hw, mine, now) : 0} Days</strong></div>
+            <div class="stat"><span>Session Quizzes</span><strong>${avgPct(qz) !== null ? avgPct(qz) + '%' : 'N/A'}</strong></div>
+            <div class="stat"><span>Monthly Exams</span><strong>${avgPct(mn) !== null ? avgPct(mn) + '%' : 'N/A'}</strong></div>
+          </div>
+          ${sc.length ? `<table><thead><tr><th>Assessment</th><th>Type</th><th>Score</th></tr></thead><tbody>${sc.map((r) => `<tr><td>${r.title}</td><td>${r.type === 'quiz' ? 'Session Quiz' : 'Monthly Exam'}</td><td>${r.score} / ${r.max}</td></tr>`).join('')}</tbody></table>` : ''}
+          <div class="notes">
+            <strong>Teacher Monthly Notes · ملاحظات المعلم:</strong>
+            <p>${s.notes ? s.notes.replace(/\n/g, '<br/>') : 'Keep up the good work and maintain daily practice.'}</p>
+          </div>
+        </div>
+      `;
+    }).join('<div class="page-break"></div>');
+
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html><head><title>Mathmatica Monthly Report</title>
+      <style>
+        body { font-family: system-ui, -apple-system, sans-serif; color: #0f172a; margin: 0; padding: 20px; background: #fff; }
+        .card { border: 2px solid #0284c7; border-radius: 14px; padding: 24px; max-width: 750px; margin: 0 auto 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e2e8f0; padding-bottom: 14px; margin-bottom: 18px; }
+        .header h1 { margin: 0; color: #0284c7; font-size: 26px; }
+        .sub { margin: 4px 0 0; color: #475569; font-size: 13px; }
+        .teacher { text-align: right; font-size: 13px; color: #334155; }
+        .info { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; background: #f8fafc; padding: 14px; border-radius: 10px; margin-bottom: 18px; font-size: 14px; }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+        .stat { border: 1px solid #cbd5e1; border-radius: 10px; padding: 12px; text-align: center; }
+        .stat span { display: block; font-size: 11px; color: #64748b; margin-bottom: 4px; }
+        .stat strong { font-size: 18px; color: #0f172a; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 13px; }
+        th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; }
+        th { background: #f1f5f9; }
+        .notes { background: #f0f9ff; border-left: 4px solid #0284c7; padding: 14px; border-radius: 8px; font-size: 14px; }
+        .notes p { margin: 6px 0 0; line-height: 1.6; }
+        .page-break { page-break-after: always; }
+        @media print { body { padding: 0; } .card { border: 1.5px solid #0284c7; } }
+      </style></head><body>${cards}
+      <script>window.onload = () => { window.print(); };</script>
+      </body></html>
+    `);
+    w.document.close();
+  }
+
   const grades = [...new Set(['Prep 2', 'Prep 3', 'Sec 1', ...D.students.map((s) => s.grade)])];
   return (
     <div className="space-y-5">
@@ -242,16 +460,39 @@ function Students({ D, a, now, act }) {
         <input className="input" placeholder="Group" value={f.group} onChange={(e) => setF({ ...f, group: e.target.value })} aria-label="Group" />
         <button className="btn"><Plus size={18} />Add · {nextCode}</button>
       </form>
-      <div className="flex justify-end"><button className="btn btn-ghost !py-2 text-sm" onClick={exportCsv}><Download size={16} />Export report (CSV)</button></div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <button className="btn !py-2 text-sm" onClick={() => printStudentPdf(D.students)} disabled={!D.students.length}><FileText size={16} />All Monthly PDFs</button>
+        <button className="btn btn-ghost !py-2 text-sm" onClick={exportCsv}><Download size={16} />Export CSV</button>
+      </div>
       <div className="panel overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead><tr className="border-b border-neon/25 text-left text-slate-300"><th className="p-3">Name</th><th className="p-3">Login code</th><th className="p-3">Grade</th><th className="p-3">Group</th><th /></tr></thead>
-          <tbody>{D.students.map((s) => (
-            <tr key={s.id} className="border-b border-neon/10"><td className="p-3 text-white">{s.name}</td><td className="p-3 font-mono neon-text">{s.code}</td><td className="p-3">{s.grade}</td><td className="p-3">{s.group}</td>
-              <td className="p-2"><button aria-label={`Remove ${s.name}`} className="text-red-400" onClick={() => remove(s)}><Trash2 size={16} /></button></td></tr>))}
+        <table className="w-full min-w-[750px] text-sm">
+          <thead><tr className="border-b border-neon/25 text-left text-slate-300"><th className="p-3">Name</th><th className="p-3">Code</th><th className="p-3">Grade & Group</th><th className="p-3">Monthly Notes (ملاحظات الشهر)</th><th className="p-3 text-right">Report / Delete</th></tr></thead>
+          <tbody>{D.students.map((s) => <StudentRow key={s.id} s={s} act={act} remove={remove} onPdf={() => printStudentPdf([s])} />)}
             {D.students.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-slate-400">Add your first student above to generate a login code.</td></tr>}</tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+function StudentRow({ s, act, remove, onPdf }) {
+  const [note, setNote] = useState(s.notes || '');
+  useEffect(() => { setNote(s.notes || ''); }, [s.notes]);
+  const saveNote = () => {
+    if (note !== (s.notes || '')) act(() => put('students', { ...s, notes: note }));
+  };
+  return (
+    <tr className="border-b border-neon/10">
+      <td className="p-3 font-semibold text-white">{s.name}</td>
+      <td className="p-3 font-mono neon-text">{s.code}</td>
+      <td className="p-3 text-slate-300">{s.grade} · {s.group}</td>
+      <td className="p-2">
+        <input className="input !py-1.5 text-xs" placeholder="Write monthly note for PDF..." value={note} onChange={(e) => setNote(e.target.value)} onBlur={saveNote} />
+      </td>
+      <td className="p-3 text-right space-x-2">
+        <button onClick={onPdf} className="inline-flex items-center gap-1 rounded bg-cyan2/15 px-2.5 py-1 text-xs font-semibold text-cyan2 hover:bg-cyan2/25" title="Download Monthly PDF"><FileText size={14} />PDF</button>
+        <button aria-label={`Remove ${s.name}`} className="text-red-400 align-middle" onClick={() => remove(s)}><Trash2 size={16} /></button>
+      </td>
+    </tr>
   );
 }
