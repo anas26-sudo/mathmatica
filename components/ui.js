@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { X, Phone, CheckCircle2, XCircle, Clock, Lock, AlertTriangle } from 'lucide-react';
+import { X, Phone, CheckCircle2, XCircle, Clock, Lock, AlertTriangle, Eye } from 'lucide-react';
 import { isLive } from '@/lib/db';
 
 export function useNow(ms = 1000) {
@@ -46,15 +46,17 @@ export function Footer() {
 }
 
 const MAP = {
-  submitted: ['b-ok', CheckCircle2, 'Submitted', 'تم التسليم'],
+  submitted: ['b-ok', CheckCircle2, 'Submitted', 'تم التصحيح'],
+  review: ['border-cyan2/60 bg-cyan2/15 text-cyan2', Eye, 'Under Review', 'قيد المراجعة'],
   missed: ['b-miss', XCircle, 'Missed (0 pts)', 'فاتك'],
   pending: ['b-pend', Clock, 'Pending', 'متاح الآن'],
   locked: ['b-lock', Lock, 'Locked', 'لم يبدأ'],
   rejected: ['b-rej', AlertTriangle, 'Rejected (0 pts)', 'مرفوض']
 };
 export function StatusBadge({ status, short }) {
-  const [cls, Icon, en] = MAP[status];
-  return <span className={`badge ${cls}`}><Icon size={13} />{short ? en.split(' ')[0] : en}</span>;
+  const [cls, Icon, en] = MAP[status] || MAP.pending;
+  const label = short ? (status === 'review' ? 'Review' : en.split(' ')[0]) : en;
+  return <span className={`badge ${cls}`}><Icon size={13} />{label}</span>;
 }
 
 export function Modal({ onClose, title, children, wide }) {

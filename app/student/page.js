@@ -28,8 +28,8 @@ export default function StudentPage() {
     const [S, A, SB, SC] = await Promise.all([list('students'), list('assignments'), list('submissions'), list('scores')]);
     const me = S.find((x) => x.id === id);
     if (!me) { localStorage.removeItem('mm_student'); return router.replace('/'); }
-    
-    const myHomeworks = A.filter((hw) => 
+
+    const myHomeworks = A.filter((hw) =>
       (!hw.targetGrade || hw.targetGrade === 'All' || hw.targetGrade === me.grade) &&
       (!hw.targetGroup || hw.targetGroup === 'All' || hw.targetGroup === me.group)
     ).sort((x, y) => (y.createdAt || new Date(y.start).getTime()) - (x.createdAt || new Date(x.start).getTime()));
@@ -78,9 +78,9 @@ export default function StudentPage() {
     try {
       const urls = [];
       for (let i = 0; i < files.length; i++) urls.push(await uploadImage(files[i].file, `${a.id}/${st.id}/day${cd}_${Date.now()}_${i}.jpg`));
-      await put('submissions', { id: subId(a, st.id, cd), assignmentId: a.id, studentId: st.id, day: cd, images: urls, note, status: 'submitted', points: a.pts, at: Date.now() });
+      await put('submissions', { id: subId(a, st.id, cd), assignmentId: a.id, studentId: st.id, day: cd, images: urls, note, status: 'review', points: 0, at: Date.now() });
       files.forEach((f) => URL.revokeObjectURL(f.url)); setFiles([]); setNote('');
-      await load(); setMsg({ ok: `Day ${cd} submitted. +${a.pts} points!` });
+      await load(); setMsg({ ok: `Day ${cd} uploaded! Status: Under Review until graded by an assistant.` });
     } catch (e) { setMsg({ err: 'Upload failed: ' + e.message + '. Check your connection and try again.' }); }
     setBusy(false);
   }
@@ -97,8 +97,8 @@ export default function StudentPage() {
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
           <Stat icon={Trophy} label="Homework points" value={`${pts}/${total}`} />
           <Stat icon={Flame} label="Streak" value={`🔥 ${streak(a, subs, now)}`} sub="days in a row" />
-          <Stat icon={ClipboardCheck} label="Session quizzes (امتحانات الحصة)" value={avgPct(quiz) === null ? '—' : avgPct(quiz) + '%'} sub={`${quiz.length} taken`} />
-          <Stat icon={GraduationCap} label="Monthly exams (امتحانات الشهر)" value={avgPct(month) === null ? '—' : avgPct(month) + '%'} sub={`${month.length} taken`} />
+          <Stat icon={ClipboardCheck} label="Session quizzes" value={avgPct(quiz) === null ? '—' : avgPct(quiz) + '%'} sub={`${quiz.length} taken`} />
+          <Stat icon={GraduationCap} label="Monthly exams" value={avgPct(month) === null ? '—' : avgPct(month) + '%'} sub={`${month.length} taken`} />
         </section>
 
         <section className="panel panel-glow pulse-glow p-5 sm:p-6" aria-live="polite">
@@ -121,7 +121,7 @@ export default function StudentPage() {
               {todayQuestions.length > 0 && (
                 <div className="mt-4 rounded-xl border border-cyan2/40 bg-cyan2/10 p-3.5 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="font-bold text-white text-sm">Today&apos;s Questions Sheet · أسئلة واجب اليوم</div>
+                    <div className="font-bold text-white text-sm">Today&apos;s Questions Sheet</div>
                     <div className="text-xs text-slate-300">Solve Q{qa}–{qb} from the attached sheet below</div>
                   </div>
                   <button
@@ -133,8 +133,17 @@ export default function StudentPage() {
                 </div>
               )}
 
-              {todaySub && <p className="mt-4 flex flex-wrap items-center gap-2 text-sm"><StatusBadge status={todaySub.status === 'rejected' ? 'rejected' : 'submitted'} /> {todaySub.status === 'rejected' ? 'Your teacher asked you to redo this day. Upload again before the timer ends.' : 'Submitted. You can replace your photos until the timer ends.'}
-                <button className="btn btn-ghost !py-1 text-xs" onClick={() => setView({ images: todaySub.images, title: `Day ${todaySub.day} homework` })}><Eye size={14} />View my upload</button></p>}
+              {todaySub && (
+                <p className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+                  <StatusBadge status={todaySub.status} />
+                  {todaySub.status === 'rejected'
+                    ? 'Your teacher asked you to redo this day. Upload again before the timer ends.'
+                    : todaySub.status === 'review'
+                    ? 'Uploaded & Under Review. Points will be added once graded by an assistant.'
+                    : `Graded & Submitted (${todaySub.points}/${a.pts} pts).`}
+                  <button className="btn btn-ghost !py-1 text-xs" onClick={() => setView({ images: todaySub.images, title: `Day ${todaySub.day} homework` })}><Eye size={14} />View my upload</button>
+                </p>
+              )}
 
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <button className="btn" onClick={() => cam.current.click()}><Camera size={18} />Take photo</button>

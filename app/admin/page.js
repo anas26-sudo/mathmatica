@@ -98,7 +98,7 @@ function Tracker({ D, sortedHw, a, setSelectedHwId, now, act }) {
         <select className="input !w-auto" value={grade} onChange={(e) => setGrade(e.target.value)} aria-label="Filter by grade">{grades.map((g) => <option key={g} value={g}>{g === 'All' ? 'All Grades' : g}</option>)}</select>
         <select className="input !w-auto" value={group} onChange={(e) => setGroup(e.target.value)} aria-label="Filter by group">{groups.map((g) => <option key={g} value={g}>{g === 'All' ? 'All Groups' : g}</option>)}</select>
         <span className="text-sm text-slate-300">{cd < 1 ? 'Not started' : cd > a.days ? 'Finished' : `Day ${cd}`}</span>
-        <span className="ml-auto flex gap-2"><StatusBadge status="submitted" short /><StatusBadge status="pending" short /><StatusBadge status="missed" short /><StatusBadge status="rejected" short /></span>
+        <span className="ml-auto flex flex-wrap gap-2"><StatusBadge status="submitted" short /><StatusBadge status="review" short /><StatusBadge status="pending" short /><StatusBadge status="missed" short /><StatusBadge status="rejected" short /></span>
       </div>
       <div className="panel overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
@@ -132,7 +132,7 @@ function Tracker({ D, sortedHw, a, setSelectedHwId, now, act }) {
 
 function CellModal({ a, s, d, sub, now, act, onClose }) {
   const st = cellStatus(a, sub, d, now);
-  const [pts, setPts] = useState(sub?.points ?? a.pts);
+  const [pts, setPts] = useState(sub?.status === 'submitted' ? sub.points : a.pts);
   const [big, setBig] = useState(null);
   const [x, y] = questionRange(a, d);
   const save = (patch) => act(async () => { await put('submissions', { ...sub, ...patch }); onClose(); });
@@ -152,7 +152,7 @@ function CellModal({ a, s, d, sub, now, act, onClose }) {
           )}
           <div className="mt-5 flex flex-wrap items-end gap-3">
             <label className="text-sm">Points (0–{a.pts})<input type="number" min="0" max={a.pts} className="input mt-1 !w-28" value={pts} onChange={(e) => setPts(e.target.value)} /></label>
-            <button className="btn" onClick={() => save({ status: 'submitted', points: Math.max(0, Math.min(a.pts, +pts || 0)) })}><Check size={16} />Save points</button>
+            <button className="btn" onClick={() => save({ status: 'submitted', points: Math.max(0, Math.min(a.pts, +pts || 0)) })}><Check size={16} />Approve & Submit</button>
             <button className="btn btn-danger" onClick={() => save({ status: 'rejected', points: 0 })}><Ban size={16} />Reject (0 pts)</button>
           </div>
         </>
